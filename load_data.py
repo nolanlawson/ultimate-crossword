@@ -37,6 +37,7 @@ elif dbtype == 'mysql':
     'create table blocks (id int primary key auto_increment, value varchar(255) unique not null);',\
     'create table user_blocks (id int primary key auto_increment, user_id int not null, block_id int not null, block_location int not null);',\
     'create unique index user_blocks_primary_idx on user_blocks (user_id, block_id, block_location);',\
+   'create unique index user_blocks_secondary_idx on user_blocks (block_id, block_location, user_id);',\
     'create index users_adobe_id on users(adobe_id);',\
     'create index users_email_idx on users(email(255));',\
     'create index users_hint_idx on users(hint(255));',\
