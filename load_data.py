@@ -27,7 +27,10 @@ elif dbtype == 'mysql':
   cur.execute('drop table if exists users')
   cur.execute('''
     create table users(id int, adobe_username varchar(1023), 
-    email varchar(1023), password varchar(255), hint longtext);''')
+    email varchar(1023), password varchar(255), hint longtext) character set utf8 collate utf8_general_ci;''')
+  cur.execute('create index users_id_idx on users (id);');
+  cur.execute('create index users_email_idx on users(email(255));');
+  cur.execute('create index users_password_idx on users(password);');
 else:
   import sqlite3
   conn = sqlite3.connect('cred.db')
