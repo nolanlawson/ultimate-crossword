@@ -25,10 +25,10 @@ elif dbtype == 'mysql':
   conn.autocommit(True)
   cur = conn.cursor()
   sql_commands = [\
+    'drop trigger if exists block_after_insert;',\
     'drop table if exists users;',\
     'drop table if exists user_blocks;',\
     'drop table if exists blocks;',\
-    'drop trigger if exists block_after_insert;',\
     '''
       create table users(
       id int primary key auto_increment, adobe_id int, adobe_username varchar(1023), 
@@ -44,21 +44,19 @@ elif dbtype == 'mysql':
 	create trigger `block_after_insert` 
 		after insert on `users`
 		     FOR EACH ROW BEGIN
-		     declare userid int;
 		     declare passwordlength int;
 		     declare block1 varchar(255);
 		     declare block2 varchar(255);
-		     set userid = last_insert_id();
 	         set passwordlength = length(NEW.password);
 	         IF (passwordlength = 12 OR passwordlength = 24) THEN
-	           set block1 = substring(NEW.password, 0, 11);
+	           set block1 = substring(NEW.password, 1, 11);
 	           insert ignore into blocks (value) values (block1);
-	           insert into user_blocks (user_id, block_id, block_location) values (userid, (select id from blocks where value = block1), 0);
+	           insert into user_blocks (user_id, block_id, block_location) values (NEW.id, (select id from blocks where value = block1), 0);
 		     END IF;
 	         IF (passwordlength = 24) THEN
 	           set block2 = substring(NEW.password, 11, 11);
 	           insert ignore into blocks (value) values (block2);
-	           insert into user_blocks (user_id, block_id, block_location) values (userid, (select id from blocks where value = block2), 1);
+	           insert into user_blocks (user_id, block_id, block_location) values (NEW.id, (select id from blocks where value = block2), 1);
 	         END IF;
 	END
   '''\
