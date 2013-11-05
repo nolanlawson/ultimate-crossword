@@ -18,7 +18,7 @@ if dbtype == 'couchdb':
 elif dbtype == 'csv':
   import csv
   csvfile = open('cred.csv','wb')
-  csvwriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+  csvwriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
 elif dbtype == 'mysql':
   import MySQLdb as mysqldb;
   conn = mysqldb.connect('koholint','adobe_leaks','adobe_leaks','adobe_leaks')
