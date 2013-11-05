@@ -18,9 +18,9 @@ create table users (
   password text, 
   hint text);''')
 
-#conn.execute('create index users_id_idx on users (id);');
-#conn.execute('create index users_email_idx on users(email);');
-#conn.execute('create index users_password_idx on users(password);');
+conn.execute('create index users_id_idx on users (id);');
+conn.execute('create index users_email_idx on users(email);');
+conn.execute('create index users_password_idx on users(password);');
 
 # batch process the file for better performance
 def load_parsed_lines(lines):
