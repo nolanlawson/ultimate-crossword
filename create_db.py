@@ -3,7 +3,7 @@
 
 import re, sqlite3
 
-BATCH_SIZE = 500000
+BATCH_SIZE = 5000000
 TOTAL_NUM_LINES = 153004874
 
 conn = sqlite3.connect('cred.db')
@@ -48,4 +48,4 @@ while lines_batch:
 
   load_parsed_lines(parsed_lines)
   numlines += len(parsed_lines)
-  print 'processed %d/%d (%.4f%%) lines from cred file so far...' % (numlines, TOTAL_NUM_LINES, (numlines * 1.0 / TOTAL_NUM_LINES))
+  print 'processed %d/%d (%.2f%%) lines from cred file so far...' % (numlines, TOTAL_NUM_LINES, (numlines * 100.0 / TOTAL_NUM_LINES))
