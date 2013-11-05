@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # create a sqlite3/couchdb database from the given cred file in the local directory
 # 
-# ./load_data.py --db [sqlite/couchdb]
+# ./load_data.py --db [sqlite/couchdb/csv/mysql]
 #
 
 import sys, re, getopt
@@ -15,6 +15,10 @@ args.update(dict(getopt.getopt(sys.argv[1:], '', ['db='])[0]))
 dbtype = args['--db']
 if dbtype == 'couchdb':
   import requests, json
+elif dbtype == 'csv':
+  import csv
+  csvfile = open('cred.csv','wb')
+  csvwriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
 elif dbtype == 'mysql':
   import MySQLdb as mysqldb;
   conn = mysqldb.connect('koholint','adobe_leaks','adobe_leaks','adobe_leaks')
@@ -46,6 +50,8 @@ def load_parsed_lines(lines):
   if dbtype == 'couchdb':
     docs = {'docs' : map((lambda line : dict(zip(['id','adobe_username','email','password','hint'],line))), lines)}
     requests.post('http://127.0.0.1:5984/adobe_leaks/_bulk_docs',data=json.dumps(docs),headers={'Content-Type':'application/json'})
+  elif dbtype == 'csv':
+    csvwriter.writerows(lines)
   elif dbtype == 'mysql':
     for line in lines:
       cur.execute('insert into users values (%s,%s,%s,%s,%s);', line)
