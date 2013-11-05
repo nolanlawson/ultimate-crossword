@@ -6,7 +6,7 @@
 
 import sys, re, getopt
 
-BATCH_SIZE = 5000000
+BATCH_SIZE = 50000
 TOTAL_NUM_LINES = 153004874
 
 args = {'--db' : 'sqlite'}
@@ -67,12 +67,26 @@ def parse_line(line):
     line = line[:-3]
   return line.split('-|-') 
 
-numlines = 0
-credfile = open('cred','rb')
-lines_batch = credfile.readlines(BATCH_SIZE)
+def main():
 
-while lines_batch:
-  parsed_lines = [parse_line(line) for line in lines_batch]
+  numlines = 0
+  credfile = open('cred','rb')
+  buffer = []
+
+  for line in credfile.xreadlines():
+    buffer.append(line)
+    if len(buffer) == BATCH_SIZE:
+      process_batch(buffer)
+      del buffer[:]
+      numlines += BATCH_SIZE
+
+      print 'processed %d/%d (%.2f%%) lines from cred file so far...' % (numlines, TOTAL_NUM_LINES, (numlines * 100.0 / TOTAL_NUM_LINES))
+
+  if len(buffer) > 0:
+    process_batch(buffer)
+
+def process_batch(lines):
+  parsed_lines = [parse_line(line) for line in lines]
 
   parsed_lines = filter((lambda line: len(line) >= 5), parsed_lines) # empty lines
 
@@ -82,5 +96,6 @@ while lines_batch:
       line = line[:5]
 
   load_parsed_lines(parsed_lines)
-  numlines += len(parsed_lines)
-  print 'processed %d/%d (%.2f%%) lines from cred file so far...' % (numlines, TOTAL_NUM_LINES, (numlines * 100.0 / TOTAL_NUM_LINES))
+
+if __name__=='__main__':
+  main()
