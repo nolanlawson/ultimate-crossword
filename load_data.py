@@ -39,6 +39,7 @@ elif dbtype == 'mysql':
     'create unique index user_blocks_primary_idx on user_blocks (user_id, block_id, block_location);',\
     'create index users_adobe_id on users(adobe_id);',\
     'create index users_email_idx on users(email(255));',\
+    'create index users_hint_idx on users(hint(255));',\
     'create index users_password_idx on users(password);',\
   	'''
 	create trigger `block_after_insert` 
