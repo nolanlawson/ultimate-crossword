@@ -3,3 +3,4 @@ cred.db
 cred.db-journal
 users.tar.gz
 cred.csv
+cred.csv.gz
