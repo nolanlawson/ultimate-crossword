@@ -12,8 +12,18 @@ TOTAL_NUM_LINES = 153004874
 args = {'--db' : 'sqlite'}
 args.update(dict(getopt.getopt(sys.argv[1:], '', ['db='])[0]))
 
-if args['--db'] == 'couchdb':
+dbtype = args['--db']
+if dbtype == 'couchdb':
   import requests, json
+elif dbtype == 'mysql':
+  import MySQLdb as mysqldb;
+  conn = mysqldb.connect('koholint','adobe_leaks','adobe_leaks','adobe_leaks')
+  conn.autocommit(True)
+  cur = conn.cursor()
+  cur.execute('drop table if exists users')
+  cur.execute('''
+    create table users(id int, adobe_username varchar(1023), 
+    email varchar(1023), password varchar(255), hint longtext);''')
 else:
   import sqlite3
   conn = sqlite3.connect('cred.db')
@@ -33,9 +43,12 @@ else:
 
 # batch process the file for better performance
 def load_parsed_lines(lines):
-  if args['--db'] == 'couchdb':
+  if dbtype == 'couchdb':
     docs = {'docs' : map((lambda line : dict(zip(['id','adobe_username','email','password','hint'],line))), lines)}
     requests.post('http://127.0.0.1:5984/adobe_leaks/_bulk_docs',data=json.dumps(docs),headers={'Content-Type':'application/json'})
+  elif dbtype == 'mysql':
+    for line in lines:
+      cur.execute('insert into users values (%s,%s,%s,%s,%s);', line)
   else:
     conn.executemany('insert into users values (?,?,?,?,?);', lines)
 
