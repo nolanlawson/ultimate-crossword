@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # create a sqlite3/couchdb database from the given cred file in the local directory
 # 
-# ./load_data.py --db [sqlite/couchdb/csv/mysql]
+# ./load_data.py --db [csv/mysql]
 #
 
 import sys, re, getopt
@@ -9,17 +9,11 @@ import sys, re, getopt
 BATCH_SIZE = 50000
 TOTAL_NUM_LINES = 153004874
 
-args = {'--db' : 'sqlite'}
+args = {'--db' : 'csv'}
 args.update(dict(getopt.getopt(sys.argv[1:], '', ['db='])[0]))
 
 dbtype = args['--db']
-if dbtype == 'couchdb':
-  import requests, json
-elif dbtype == 'csv':
-  import csv
-  csvfile = open('cred.csv','wb')
-  csvwriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
-elif dbtype == 'mysql':
+if dbtype == 'mysql':
   import MySQLdb as mysqldb;
   conn = mysqldb.connect('koholint','adobe_leaks','adobe_leaks','adobe_leaks')
   conn.autocommit(True)
@@ -65,41 +59,36 @@ elif dbtype == 'mysql':
   ]
   for sql_command in sql_commands:
 	cur.execute(sql_command)
-else:
-  import sqlite3
-  conn = sqlite3.connect('cred.db')
-  # create DB and clear if it has any lines in it
-  conn.execute('drop table if exists users;')
-  conn.execute('''
-  create table users (
-    id int, 
-    adobe_username text, 
-    email text, 
-    password text, 
-    hint text);''')
-
-  conn.execute('create index users_id_idx on users (id);');
-  conn.execute('create index users_email_idx on users(email);');
-  conn.execute('create index users_password_idx on users(password);');
+else: # csv
+  import csv
+  csvfile = open('cred.csv','wb')
+  csvwriter = csv.writer(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
 
 # batch process the file for better performance
 def load_parsed_lines(lines):
-  if dbtype == 'couchdb':
-    docs = {'docs' : map((lambda line : dict(zip(['id','adobe_username','email','password','hint'],line))), lines)}
-    requests.post('http://127.0.0.1:5984/adobe_leaks/_bulk_docs',data=json.dumps(docs),headers={'Content-Type':'application/json'})
-  elif dbtype == 'csv':
-    csvwriter.writerows(lines)
-  elif dbtype == 'mysql':
+  if dbtype == 'mysql':
     for line in lines:
       cur.execute('insert into users(adobe_id,adobe_username,email,password,hint) values (%s,%s,%s,%s,%s);', line)
-  else:
-    conn.executemany('insert into users values (?,?,?,?,?);', lines)
+  else: # csv
+    csvwriter.writerows(lines)
 
 def parse_line(line):
   line = line.strip()
   if line.endswith('|--'):
     line = line[:-3]
   return line.split('-|-') 
+
+def process_batch(lines):
+  parsed_lines = [parse_line(line) for line in lines]
+
+  parsed_lines = filter((lambda line: len(line) >= 5), parsed_lines) # empty lines
+
+  for line in parsed_lines:
+    if len(line) > 5:
+      print "found a line with too many fields, ignoring extra fields:",line
+      line = line[:5]
+
+  load_parsed_lines(parsed_lines)
 
 def main():
 
@@ -118,18 +107,6 @@ def main():
 
   if len(buffer) > 0:
     process_batch(buffer)
-
-def process_batch(lines):
-  parsed_lines = [parse_line(line) for line in lines]
-
-  parsed_lines = filter((lambda line: len(line) >= 5), parsed_lines) # empty lines
-
-  for line in parsed_lines:
-    if len(line) > 5:
-      print "found a line with too many fields, ignoring extra fields:",line
-      line = line[:5]
-
-  load_parsed_lines(parsed_lines)
 
 if __name__=='__main__':
   main()
