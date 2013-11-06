@@ -19,10 +19,14 @@ if dbtype == 'mysql':
   conn.autocommit(True)
   cur = conn.cursor()
   sql_commands = [\
+    'set storage_engine=InnoDB;',\
     'drop trigger if exists block_after_insert;',\
+    'drop trigger if exists block_counts_create',\
+    'drop trigger if exists block_counts_update',\
     'drop table if exists users;',\
     'drop table if exists user_blocks;',\
     'drop table if exists blocks;',\
+    'drop table if exists block_counts;',\
     '''
       create table users(
       id int primary key auto_increment, adobe_id int, adobe_username varchar(1023), 
@@ -30,12 +34,13 @@ if dbtype == 'mysql':
     ''',\
     'create table blocks (id int primary key auto_increment, value varchar(255) unique not null);',\
     'create table user_blocks (id int primary key auto_increment, user_id int not null, block_id int not null, block_location int not null);',\
+    'create table block_counts (block_id int primary key, count int not null default 0)',\
     'create unique index user_blocks_primary_idx on user_blocks (user_id, block_id, block_location);',\
-   'create unique index user_blocks_secondary_idx on user_blocks (block_id, block_location, user_id);',\
+    'create unique index user_blocks_secondary_idx on user_blocks (block_id, block_location, user_id);',\
     'create index users_adobe_id on users(adobe_id);',\
-    'create index users_email_idx on users(email(255));',\
-    'create index users_hint_idx on users(hint(255));',\
-    'create index users_password_idx on users(password);',\
+    'create index users_email_idx on users(email(16));',\
+    'create index users_hint_idx on users(hint(16));',\
+    'create index block_counts_counts_idx on block_counts(count)',\
   	'''
 	create trigger `block_after_insert` 
 		after insert on `users`
@@ -55,7 +60,21 @@ if dbtype == 'mysql':
 	           insert into user_blocks (user_id, block_id, block_location) values (NEW.id, (select id from blocks where value = block2), 1);
 	         END IF;
 	END
-  '''\
+  ''',\
+  '''
+  create trigger `block_counts_create`
+    after insert on blocks
+      for each row begin
+      insert into block_counts(block_id, count) values (NEW.id, 0);
+    END
+  ''',\
+  '''
+  create trigger `block_counts_update`
+    after insert on user_blocks
+      for each row begin
+      update block_counts set count = count + 1 where block_id = NEW.block_id;
+  END
+  ''',\
   ]
   for sql_command in sql_commands:
 	cur.execute(sql_command)
