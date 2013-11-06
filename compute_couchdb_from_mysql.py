@@ -17,63 +17,85 @@ MYSQL_USER = 'adobe_leaks'
 MYSQL_PASSWORD = 'adobe_leaks'
 MYSQL_DB = 'adobe_leaks'
 
-MAX_NUM_BLOCKS = 1000
+MAX_NUM_BLOCKS = 10
 MIN_BLOCK_POPULARITY = 10
+
+conn = mysqldb.connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB)
+
+def fetch_users_to_related_docs(users_and_hints, block_id):
+  if len(users_and_hints) == 0:
+    return {}
+
+  # fetch related blocks, i.e. preceding or following blocks
+  all_user_ids = ','.join(set(map(lambda x : str(int(x[0])), users_and_hints)))
+  sql = '''select user_id, block_id, block_location
+    from user_blocks
+    where user_id in (''' + all_user_ids + ''') and block_id != %s
+  '''
+  #print "executing sql:",sql
+  cur = conn.cursor()
+  cur.execute(sql, (block_id))
+
+  result = dict(map((lambda x : [x[0], x[1:]]), cur.fetchall()))
+  cur.close()
+  return result
 
 def create_block_document(block_id, count):
   cur = conn.cursor()
   # fetch preliminary list of users and hints
-  cur.execute('''select id, hint
+  cur.execute('''select u.id, hint
     from users u, user_blocks ub
-    where ub.block_id=%d and u.id=ub.user_id
+    where ub.block_id=%s and u.id=ub.user_id
     and hint != '' and hint is not null''', (block_id))
 
   users_and_hints = cur.fetchall()
-
-  # fetch related blocks, i.e. preceding or following blocks
-  all_user_ids = str(tuple(set(map(lambda x : x[0], users_to_hints))))
-  cur.execute('''select user_id, block_id, block_position
-    from user_blocks
-    where user_id = in %s and block_id != %d
-  ''', (all_user_ids, block_id))
-
-  users_to_related_blocks = dict(map((lambda x : [x[0], x[1:2]]), cur.fetchall()))
   cur.close()
+
+  users_to_related_blocks = fetch_users_to_related_docs(users_and_hints, block_id);
   
-  result = {'_id' : block_id, 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
+  result = {'_id' : str(block_id), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
   for [user_id, hint] in users_and_hints:
     if user_id in users_to_related_blocks: # has a related block
-      (other_block_id, other_block_position) = users_to_related_blocks[user_id]
-      key = 'following_blocks' if other_block_position == 1 else 'preceding_blocks';
+      (other_block_id, other_block_location) = tuple(users_to_related_blocks[user_id])
+      key = 'following_blocks' if other_block_location == 1 else 'preceding_blocks';
       try:
-        result['following_blocks'][other_block_id] += [hint]
+        result['following_blocks'][str(other_block_id)] += [hint]
       except KeyError:
-        result['following_blocks'][other_block_id] = [hint]
+        result['following_blocks'][str(other_block_id)] = [hint]
     else: # no related block; singleton only
       result['hints'] += [hint]
   return result
   
 def create_block_documents():
-  conn = mysqldb.connect(MYSQL_HOST, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DB)
   cur = conn.cursor()
   docs = []
-  cur.execute('''select count(*) as counter, block_id 
-    from user_blocks
-    group by block_id having counter > %s order by counter desc
+  cur.execute('''select bc.count, bc.block_id 
+    from block_counts bc
+    where bc.count > %s order by bc.count desc
     limit %s''', (MIN_BLOCK_POPULARITY, MAX_NUM_BLOCKS))
   for row in cur.fetchall():
     (count, block_id) = tuple(row)
-    docs += [create_block_document(block_id, count)];
+    doc = create_block_document(block_id, count)
+    #print "created doc:", doc
+    print ".",
+    sys.stdout.flush()
+    docs += [doc];
+  print
   cur.close()
   return docs
   
 
 def main():
+  print "reading from MySQL..."
   docs = create_block_documents()
+  print "posting to CouchDB..."
 
   # post the documents to couchdb
   couchdb_url = 'http://%s:5984/%s/_bulk_docs' % (COUCHDB_HOST, COUCHDB_DB)
-  requests.post(couchdb_url,data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
+  response = requests.post(couchdb_url,data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
+  print response.status_code
+  print response.json()
+  print "done."
   
 if __name__=='__main__':
   main()
