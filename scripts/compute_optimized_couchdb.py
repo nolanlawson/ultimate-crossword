@@ -13,8 +13,6 @@ COUCHDB_HOST = '127.0.0.1'
 COUCHDB_INPUT_DB = 'blocks'
 COUCHDB_OUTPUT_DB = 'block_stats'
 
-STALE = 'update_after' # for testing purposes, use update_after
-
 COUCHDB_BULK_INSERT_SIZE = 1000
 
 couchdb_input_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_INPUT_DB)
@@ -38,7 +36,7 @@ design_documents = [
 def create_block_document(block, count):
   
   block_hints_url = couchdb_input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
-  params = {'stale' : STALE, 'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+  params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
   block_hints = requests.get(block_hints_url, params=params).json()
     
   result = {'_id' : block, 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
@@ -65,7 +63,7 @@ def post_documents_to_couchdb(docs, last_counter, num_docs):
 def create_block_documents():
   
   block_counts_url = couchdb_input_url + '/_design/blocks_to_counts/_view/blocks_to_counts'
-  block_counts = requests.get(block_counts_url, params={'group' : 'true', 'reduce' : 'true', 'stale' : STALE}).json()
+  block_counts = requests.get(block_counts_url, params={'group' : 'true', 'reduce' : 'true'}).json()
 
   counter = 0
   num_docs = len(block_counts['rows'])

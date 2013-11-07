@@ -7,12 +7,12 @@
 
 import sys, re, getopt, csv, requests, json
 
-MIN_BLOCK_COUNT = 5
-BATCH_SIZE = 1000000
+MIN_BLOCK_COUNT = 1
+BATCH_SIZE = 500000
 COUCHDB_BULK_INSERT_SIZE = 10000 # per http://dev.svetlyak.ru/couchdb-bulk-inserts-performance-en/
 
 COUCHDB_HOST = '127.0.0.1'
-COUCHDB_DB = 'blocks'
+COUCHDB_DB = 'blocks_full'
 
 TOTAL_NUM_LINES = 153004874
 
