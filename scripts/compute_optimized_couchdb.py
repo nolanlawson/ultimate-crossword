@@ -56,32 +56,28 @@ def create_block_document(block, count):
   return result
   
   
-def post_documents_to_couchdb(docs, last_counter, num_docs):
+def post_documents_to_couchdb(docs, last_counter):
   response = requests.post(couchdb_output_url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
-  print "Posted %d/%d documents (%.2f%%), response: %d" % (last_counter, num_docs, (100.0 * last_counter / num_docs), response.status_code)
+  print "Posted %d documents, response: %d" % (last_counter, response.status_code)
   
 def create_block_documents():
   
   block_counts_url = couchdb_input_url + '/_design/blocks_to_counts/_view/blocks_to_counts'
-  block_counts = requests.get(block_counts_url, params={'group' : 'true', 'reduce' : 'true'}).json()
-
+  params = {'group' : 'true', 'reduce' : 'true', 'limit' : COUCHDB_BULK_INSERT_SIZE}
+  
   counter = 0
-  num_docs = len(block_counts['rows'])
-  print "Found %d blocks total" % (num_docs)
-  
-  docs_buffer = []
-  for row in block_counts['rows']:
-    (block, count) = (row['key'], row['value'])
-    doc = create_block_document(block, count)
-    counter += 1
+  while True:
+    block_counts = requests.get(block_counts_url, params=params).json()
+    if (len(block_counts) == 0):
+      break
     
-    docs_buffer.append(doc)
-    if (len(docs_buffer) == COUCHDB_BULK_INSERT_SIZE):
-      post_documents_to_couchdb(docs_buffer, counter, num_docs)
-      del docs_buffer[:]
-  
-  if (len(docs_buffer) > 0):
-    post_documents_to_couchdb(docs_buffer, counter, num_docs)
+    docs_batch = map((lambda row : create_block_document(row['key'], row['value'])), block_counts['rows'])
+    
+    counter += len(docs_batch)
+    
+    post_documents_to_couchdb(docs_batch, counter)
+    
+    params.update({'startkey' : block_counts[-1]['key'], 'skip' : 1})
 
 def main():
   
