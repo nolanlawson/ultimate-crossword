@@ -13,7 +13,7 @@ COUCHDB_HOST = '127.0.0.1'
 COUCHDB_INPUT_DB = 'blocks'
 COUCHDB_OUTPUT_DB = 'block_stats'
 
-COUCHDB_BULK_INSERT_SIZE = 1000
+COUCHDB_BULK_INSERT_SIZE = 100
 
 couchdb_input_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_INPUT_DB)
 couchdb_output_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_OUTPUT_DB)
@@ -33,13 +33,29 @@ design_documents = [
   }
 }]
 
+anonymizer = {}
+anonymous_count = 0
+
+def anonymize(block):
+  global anonymous_count
+  
+  # I don't know if anyone will ever actually reverse-engineer Adobe's encryption, but
+  # I can cover my ass by using an integer instead of the string
+  try:
+    return anonymizer[block]
+  except KeyError:
+    count = anonymous_count
+    anonymizer[block] = count
+    anonymous_count += 1
+    return count
+
 def create_block_document(block, count):
   
   block_hints_url = couchdb_input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
-  params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+  params = {'stale' : 'ok', 'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
   block_hints = requests.get(block_hints_url, params=params).json()
     
-  result = {'_id' : block, 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
+  result = {'_id' : str(anonymize(block)), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
   for block_hint in block_hints['rows']:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
     
@@ -48,9 +64,9 @@ def create_block_document(block, count):
       
       key = 'preceding_blocks' if reverse_order else 'following_blocks';
       try:
-        result['following_blocks'][str(related_block)] += hints
+        result['following_blocks'][str(anonymize(related_block))] += hints
       except KeyError:
-        result['following_blocks'][str(related_block)] = hints
+        result['following_blocks'][str(anonymize(related_block))] = hints
     else: # no related block; singleton only
       result['hints'] += hints
   return result
@@ -63,11 +79,12 @@ def post_documents_to_couchdb(docs, last_counter):
 def create_block_documents():
   
   block_counts_url = couchdb_input_url + '/_design/blocks_to_counts/_view/blocks_to_counts'
-  params = {'group' : 'true', 'reduce' : 'true', 'limit' : COUCHDB_BULK_INSERT_SIZE}
+  params = {'group' : 'true', 'reduce' : 'true', 'stale' : 'ok', 'limit' : COUCHDB_BULK_INSERT_SIZE}
   
   counter = 0
   while True:
     block_counts = requests.get(block_counts_url, params=params).json()
+
     if (len(block_counts) == 0):
       break
     
@@ -77,7 +94,7 @@ def create_block_documents():
     
     post_documents_to_couchdb(docs_batch, counter)
     
-    params.update({'startkey' : block_counts[-1]['key'], 'skip' : 1})
+    params.update({'startkey' : json.dumps(block_counts['rows'][-1]['key']), 'skip' : 1})
 
 def main():
   

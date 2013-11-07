@@ -7,12 +7,12 @@
 
 import sys, re, getopt, csv, requests, json
 
-MIN_BLOCK_COUNT = 1
-BATCH_SIZE = 500000
+MIN_BLOCK_COUNT = 10
+BATCH_SIZE = 1000000
 COUCHDB_BULK_INSERT_SIZE = 10000 # per http://dev.svetlyak.ru/couchdb-bulk-inserts-performance-en/
 
 COUCHDB_HOST = '127.0.0.1'
-COUCHDB_DB = 'blocks_full'
+COUCHDB_DB = 'blocks'
 
 TOTAL_NUM_LINES = 153004874
 
@@ -62,7 +62,7 @@ couchdb_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_DB);
 csvfile = open('cred.csv','rb')
 csvreader = csv.reader(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
 
-bogus_hint_pattern = re.compile('(?:\s\?)+') # hints were incorrectly decoded from UTF-8; some are just question marks
+bogus_hint_pattern = re.compile('^[\s\?]+$') # hints were incorrectly decoded from UTF-8; some are just question marks
 
 def add_blocks(blocks, new_blocks):
   
