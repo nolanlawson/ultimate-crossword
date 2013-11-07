@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-# create a sqlite3/couchdb database from the given cred file in the local directory
+# create a csv/mysql database from the given cred file in the local directory
 # 
-# ./load_data.py --db [csv/mysql]
+# ./load_cred_file.py --db [csv/mysql]
 #
 
 import sys, re, getopt
