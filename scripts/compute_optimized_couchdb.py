@@ -15,6 +15,8 @@ COUCHDB_OUTPUT_DB = 'block_stats'
 
 COUCHDB_BULK_INSERT_SIZE = 100
 
+DEBUG_MODE = True # sets stale to update_after
+
 couchdb_input_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_INPUT_DB)
 couchdb_output_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_OUTPUT_DB)
 
@@ -52,7 +54,9 @@ def anonymize(block):
 def create_block_document(block, count):
   
   block_hints_url = couchdb_input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
-  params = {'stale' : 'ok', 'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+  params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+  if (DEBUG_MODE):
+    params['stale'] = 'update_after'
   block_hints = requests.get(block_hints_url, params=params).json()
     
   result = {'_id' : str(anonymize(block)), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
@@ -80,6 +84,8 @@ def create_block_documents():
   
   block_counts_url = couchdb_input_url + '/_design/blocks_to_counts/_view/blocks_to_counts'
   params = {'group' : 'true', 'reduce' : 'true', 'stale' : 'ok', 'limit' : COUCHDB_BULK_INSERT_SIZE}
+  if (DEBUG_MODE):
+    params['stale'] = 'update_after'
   
   counter = 0
   while True:
