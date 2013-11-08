@@ -14,8 +14,8 @@ COUCHDB_BULK_INSERT_SIZE = 100
 DEBUG_MODE = True # sets stale to update_after
 
 INPUT_URL = 'http://localhost:5984/blocks'
-OUTPUT_URL = 'http://koholint-wired:5985/block_stats'
-OUTPUT_DETAILS_URL = 'http://koholint-wired:5985/block_details'
+OUTPUT_URL = 'http://koholint-wired:5985/block_summaries'
+OUTPUT_DETAILS_URL = 'http://koholint-wired:5985/related_blocks'
 
 
 design_documents = [
