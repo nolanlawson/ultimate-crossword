@@ -7,18 +7,16 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, json, sys, base64, re, MySQLdb as mysqldb
-
-COUCHDB_HOST = '127.0.0.1'
-COUCHDB_INPUT_DB = 'blocks'
-COUCHDB_OUTPUT_DB = 'block_stats'
+import requests, json, sys, base64, re, itertools
 
 COUCHDB_BULK_INSERT_SIZE = 100
 
 DEBUG_MODE = True # sets stale to update_after
 
-couchdb_input_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_INPUT_DB)
-couchdb_output_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_OUTPUT_DB)
+INPUT_URL = 'http://localhost:5984/blocks'
+OUTPUT_URL = 'http://koholint-wired:5985/block_stats'
+OUTPUT_DETAILS_URL = 'http://koholint-wired:5985/block_details'
+
 
 design_documents = [
 {
@@ -53,13 +51,13 @@ def anonymize(block):
 
 def create_block_document(block, count):
   
-  block_hints_url = couchdb_input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
+  block_hints_url = INPUT_URL + '/_design/blocks_to_hints/_view/blocks_to_hints'
   params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
   block_hints = requests.get(block_hints_url, params=params).json()
     
-  result = {'_id' : anonymize(block), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
+  result = {'_id' : anonymize(block), 'count' : count, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   rows = block_hints['rows'] if 'rows' in block_hints else []
   for block_hint in rows:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
@@ -67,25 +65,66 @@ def create_block_document(block, count):
     if len(key[0]) > 1: # has a related block
       (related_block, reverse_order) = (key[0][1], key[1])
       
-      key = 'preceding_blocks' if reverse_order else 'following_blocks';
+      key = 'precedingBlocks' if reverse_order else 'followingBlocks';
       try:
-        result['following_blocks'][anonymize(related_block)] += hints
+        result['followingBlocks'][anonymize(related_block)] += hints
       except KeyError:
-        result['following_blocks'][anonymize(related_block)] = hints
+        result['followingBlocks'][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
   return result
   
+
+def split_doc_into_summary_and_details(doc):
+  # split docs into an optimized summary/detail format and post
+  # to two separate databases
   
-def post_documents_to_couchdb(docs, last_counter):
-  response = requests.post(couchdb_output_url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
-  print "Posted %d documents, response: %d" % (last_counter, response.status_code)
+  # create separate docs
+  related_blocks = []
+  for (otherBlocks, preceding) in ((doc['precedingBlocks'], True), (doc['followingBlocks'], False)):
+    for (otherBlock, hints) in otherBlocks.items():
+      related_blocks.append({'preceding' : preceding, 'hints' : hints, 'count' : len(hints), 'block' : int(otherBlock)})
+  
+  # sort by count
+  related_blocks = sorted(related_blocks, key=lambda related_block : related_block['count'])
+  related_blocks.reverse()
+  
+  # remove details from original doc
+  del doc['precedingBlocks']
+  del doc['followingBlocks']
+  
+  # apply an id to look like this : <blockId>~01, <blockId>~02
+  # this means we can sort lexicographically in CouchDB by blockId, then number of hints (descending)
+  max_id_len = len(str(len(related_blocks)))
+  for i in range(len(related_blocks)):
+    related_block = related_blocks[i]
+    related_block['_id'] = doc['_id'] + "~" + str(i).zfill(max_id_len)
+  
+  return (doc, related_blocks)
+
+def post_bulk(url, docs):
+  
+  response = requests.post(url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
+  print "Posted %d documents to %s, response: %d" % (len(docs), url, response.status_code)
   if (str(response.status_code).startswith('4')): # error
     print " > Got error", response.json()
   
+def post_documents_to_couchdb(docs, last_counter):
+  
+  summaries_and_details = map(split_doc_into_summary_and_details, docs);
+  
+  summary_docs = map(lambda x : x[0], summaries_and_details)
+  details_docs = map(lambda x : x[1], summaries_and_details)
+  details_docs = list(itertools.chain(*details_docs)) # flatten
+    
+  post_bulk(OUTPUT_URL, summary_docs)
+  post_bulk(OUTPUT_DETAILS_URL, details_docs)
+  
+  print "Posted %d blocks total..." % (last_counter)
+  
 def create_block_documents():
   
-  block_counts_url = couchdb_input_url + '/_design/blocks_to_counts/_view/blocks_to_counts'
+  block_counts_url = INPUT_URL + '/_design/blocks_to_counts/_view/blocks_to_counts'
   params = {'group' : 'true', 'reduce' : 'true', 'stale' : 'ok', 'limit' : COUCHDB_BULK_INSERT_SIZE}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
@@ -110,16 +149,17 @@ def create_block_documents():
 
 def main():
   
-  # drop and re-create
-  print 'dropping database, response is', requests.delete(couchdb_output_url).status_code
-  print 'creating database, response is', requests.put(couchdb_output_url).status_code  
+  # drop and re-create both output databases
+  for url in (OUTPUT_URL, OUTPUT_DETAILS_URL):
+    print 'dropping database %s, response is %s' % (url, requests.delete(url).status_code)
+    print 'creating database %s, response is %s' % (url, requests.put(url).status_code)
   
   for design_doc in design_documents:
-    response = requests.put(couchdb_output_url + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
+    response = requests.put(OUTPUT_URL + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
     print 'posted design doc %s to CouchDB, got response %d' % (design_doc['_id'], response.status_code)
   
   print "reading from old CouchDB..."
-  docs = create_block_documents()
+  create_block_documents()
   
   # just in case I need this later
   fileout = open('block_mappings.json', 'wb')
