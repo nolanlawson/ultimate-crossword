@@ -6,3 +6,4 @@ cred.csv
 cred.csv.gz
 .DS_Store
 nohup.out
+block_mappings.json

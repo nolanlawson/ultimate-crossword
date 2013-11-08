@@ -7,7 +7,7 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, json, sys, MySQLdb as mysqldb
+import requests, json, sys, base64, re, MySQLdb as mysqldb
 
 COUCHDB_HOST = '127.0.0.1'
 COUCHDB_INPUT_DB = 'blocks'
@@ -44,12 +44,12 @@ def anonymize(block):
   # I don't know if anyone will ever actually reverse-engineer Adobe's encryption, but
   # I can cover my ass by using an integer instead of the string
   try:
-    return anonymizer[block]
+    return str(anonymizer[block])
   except KeyError:
     count = anonymous_count
     anonymizer[block] = count
     anonymous_count += 1
-    return count
+    return str(count)
 
 def create_block_document(block, count):
   
@@ -59,8 +59,9 @@ def create_block_document(block, count):
     params['stale'] = 'update_after'
   block_hints = requests.get(block_hints_url, params=params).json()
     
-  result = {'_id' : str(anonymize(block)), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
-  for block_hint in block_hints['rows']:
+  result = {'_id' : anonymize(block), 'count' : count, 'hints' : [], 'preceding_blocks' : {}, 'following_blocks' : {}}
+  rows = block_hints['rows'] if 'rows' in block_hints else []
+  for block_hint in rows:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
     
     if len(key[0]) > 1: # has a related block
@@ -68,9 +69,9 @@ def create_block_document(block, count):
       
       key = 'preceding_blocks' if reverse_order else 'following_blocks';
       try:
-        result['following_blocks'][str(anonymize(related_block))] += hints
+        result['following_blocks'][anonymize(related_block)] += hints
       except KeyError:
-        result['following_blocks'][str(anonymize(related_block))] = hints
+        result['following_blocks'][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
   return result
@@ -79,6 +80,8 @@ def create_block_document(block, count):
 def post_documents_to_couchdb(docs, last_counter):
   response = requests.post(couchdb_output_url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
   print "Posted %d documents, response: %d" % (last_counter, response.status_code)
+  if (str(response.status_code).startswith('4')): # error
+    print " > Got error", response.json()
   
 def create_block_documents():
   
@@ -101,6 +104,9 @@ def create_block_documents():
     post_documents_to_couchdb(docs_batch, counter)
     
     params.update({'startkey' : json.dumps(block_counts['rows'][-1]['key']), 'skip' : 1})
+    
+    if (DEBUG_MODE and counter > (COUCHDB_BULK_INSERT_SIZE * 20)):
+      break
 
 def main():
   
@@ -114,6 +120,11 @@ def main():
   
   print "reading from old CouchDB..."
   docs = create_block_documents()
+  
+  # just in case I need this later
+  fileout = open('block_mappings.json', 'wb')
+  print >>fileout,json.dumps(anonymizer)
+  fileout.close()
   
 if __name__=='__main__':
   main()
