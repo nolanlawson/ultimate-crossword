@@ -27,7 +27,7 @@ design_documents = [
       'language' : 'javascript',
       'map'    : '''
       function(doc) {
-        var totalCount = doc.soloCount + doc.precedingCount + doc.followingCount;
+        var totalCount = doc.soloCount + doc.followingCount;
         emit(totalCount, null);
       }
       ''',
