@@ -92,6 +92,7 @@ def split_doc_into_summary_and_details(doc):
   # remove details from original doc
   del doc['precedingBlocks']
   del doc['followingBlocks']
+  doc['numRelated'] = len(related_blocks)
   
   # apply an id to look like this : <blockId>~01, <blockId>~02
   # this means we can sort lexicographically in CouchDB by blockId, then number of hints (descending)
