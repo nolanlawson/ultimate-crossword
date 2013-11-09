@@ -15,8 +15,8 @@ COUCHDB_BULK_INSERT_SIZE = 100
 DEBUG_MODE = False
 
 INPUT_URL = 'http://localhost:5984/blocks'
-OUTPUT_URL = 'http://localhost:5984/block_summaries'
-OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks'
+OUTPUT_URL = 'http://localhost:5984/block_summaries2'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks2'
 
 
 design_documents = [
@@ -27,7 +27,8 @@ design_documents = [
       'language' : 'javascript',
       'map'    : '''
       function(doc) {
-        emit(doc.count, null);
+        var totalCount = doc.soloCount + doc.precedingCount + doc.followingCount;
+        emit(totalCount, null);
       }
       ''',
     }
@@ -58,7 +59,7 @@ def create_block_document(block, count):
     params['stale'] = 'update_after'
   block_hints = requests.get(block_hints_url, params=params).json()
     
-  result = {'_id' : anonymize(block), 'count' : count, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
+  result = {'_id' : anonymize(block), 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   rows = block_hints['rows'] if 'rows' in block_hints else []
   for block_hint in rows:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
@@ -68,9 +69,9 @@ def create_block_document(block, count):
       
       key = 'precedingBlocks' if reverse_order else 'followingBlocks';
       try:
-        result['followingBlocks'][anonymize(related_block)] += hints
+        result[key][anonymize(related_block)] += hints
       except KeyError:
-        result['followingBlocks'][anonymize(related_block)] = hints
+        result[key][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
   return result
@@ -90,10 +91,18 @@ def split_doc_into_summary_and_details(doc):
   related_blocks = sorted(related_blocks, key=lambda related_block : related_block['count'])
   related_blocks.reverse()
   
+  
+  # I realized only later that this count is inaccurate - it's a lower bound,
+  # because I pruned with a minimum count of 2 in the other script
+  # So in fact I can just count all the hints and it will give me the more accurate number,
+  # since those weren't pruned
+  doc['soloCount'] = len(doc['hints'])
+  doc['followingCount'] = len(doc['followingBlocks'])
+  doc['precedingCount'] = len(doc['precedingBlocks'])
+  
   # remove details from original doc
   del doc['precedingBlocks']
   del doc['followingBlocks']
-  doc['numRelated'] = len(related_blocks)
   
   # apply an id to look like this : <blockId>~01, <blockId>~02
   # this means we can sort lexicographically in CouchDB by blockId, then number of hints (descending)
