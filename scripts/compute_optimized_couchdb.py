@@ -11,11 +11,12 @@ import requests, json, sys, base64, re, itertools
 
 COUCHDB_BULK_INSERT_SIZE = 100
 
-DEBUG_MODE = True # sets stale to update_after
+# if true, sets stale to update_after
+DEBUG_MODE = False
 
 INPUT_URL = 'http://localhost:5984/blocks'
-OUTPUT_URL = 'http://koholint-wired:5985/block_summaries'
-OUTPUT_DETAILS_URL = 'http://koholint-wired:5985/related_blocks'
+OUTPUT_URL = 'http://localhost:5984/block_summaries'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks'
 
 
 design_documents = [
@@ -126,7 +127,7 @@ def post_documents_to_couchdb(docs, last_counter):
 def create_block_documents():
   
   block_counts_url = INPUT_URL + '/_design/blocks_to_counts/_view/blocks_to_counts'
-  params = {'group' : 'true', 'reduce' : 'true', 'stale' : 'ok', 'limit' : COUCHDB_BULK_INSERT_SIZE}
+  params = {'group' : 'true', 'reduce' : 'true', 'limit' : COUCHDB_BULK_INSERT_SIZE}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
   
