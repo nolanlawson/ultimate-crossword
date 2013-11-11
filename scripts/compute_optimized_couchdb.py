@@ -7,9 +7,13 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, grequests, urllib, json, sys, base64, re, itertools
+import requests, urllib, json, sys, base64, re, itertools
+import gevent.monkey
+gevent.monkey.patch_socket()
+from gevent.pool import Pool
 
-COUCHDB_BULK_INSERT_SIZE = 100
+COUCHDB_BULK_INSERT_SIZE = 10000
+POOL_SIZE = 100
 MAX_NUM_HINTS_IN_SUMMARY = 30
 
 # if true, sets stale to update_after
@@ -152,11 +156,12 @@ def split_doc_into_summary_and_details(doc):
   return (doc, related_blocks, doc_hints)
 
 def post_bulk(url, docs):
+  if len(docs) > 0:
+    response = requests.post(url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
+    print " > Posted %d documents to %s, response: %d" % (len(docs), url, response.status_code)
+    if (str(response.status_code).startswith('4')): # error
+      print " > > Got error", response.json()
   
-  response = requests.post(url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
-  print " > Posted %d documents to %s, response: %d" % (len(docs), url, response.status_code)
-  if (str(response.status_code).startswith('4')): # error
-    print " > > Got error", response.json()
   
 def post_documents_to_couchdb(docs):
   
@@ -193,19 +198,20 @@ def create_block_documents():
     
     block_hints_urls = map(lambda row : get_block_hints_url(row['key']), block_counts['rows']);
     
-    url_requests = (grequests.get(u) for u in block_hints_urls)
+    def fetch((url, row)):
+      response = requests.get(url)
+      block_hints = response.json()
+      block_document = create_block_document(row['key'], row['value'], block_hints);
+      post_documents_to_couchdb([block_document])
+    
     
     print 'executing %d multiple requests for block hints at the same time' % len(block_hints_urls)
-    url_responses = grequests.map(url_requests)
-    print "done executing"
-    
-    docs_buffer = []
-    for (row, response) in zip(block_counts['rows'], url_responses):
-      block_hints = response.json()
-      docs_buffer.append(create_block_document(row['key'], row['value'], block_hints));
-    
-    post_documents_to_couchdb(docs_buffer);
-    counter += len(docs_buffer)
+    pool = Pool(POOL_SIZE)
+    for (url,row) in zip(block_hints_urls, block_counts['rows']):
+      pool.spawn(fetch, (url,row))
+    pool.join()
+
+    counter += len(block_counts)
     print "Posted %d docs total\n" % counter 
     
     params.update({'startkey' : json.dumps(block_counts['rows'][-1]['key']), 'skip' : 1})
