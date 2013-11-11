@@ -53,7 +53,7 @@ def main():
           'id' : doc['_id'],\
           'hints' : hints,\
           'docType' : doc_type,\
-          'popularity' : doc['count'] if doc_type == 'related' else (doc['soloCount'] + doc['followingCount'])}  
+          'popularity' : doc['count'] if doc_type == 'related' else (doc['soloHintCount'] + doc['followingHintCount'])}  
   
     while True:
       response = requests.get(couchdb_url + '/_all_docs', params=params)

@@ -28,7 +28,7 @@ design_documents = [
       'language' : 'javascript',
       'map'    : '''
       function(doc) {
-        var totalCount = doc.soloCount + doc.followingCount;
+        var totalCount = doc.soloHintCount + doc.followingHintCount;
         emit(totalCount, null);
       }
       ''',
@@ -125,9 +125,11 @@ def split_doc_into_summary_and_details(doc):
   # because I pruned with a minimum count of 2 in the other script
   # So in fact I can just count all the hints and it will give me the more accurate number,
   # since those weren't pruned
-  doc['soloCount'] = len(doc['hints'])
-  doc['followingCount'] = len(doc['followingBlocks'])
-  doc['precedingCount'] = len(doc['precedingBlocks'])
+  doc['followingBlockCount'] = len(doc['followingBlocks'])
+  doc['precedingBlockCount'] = len(doc['precedingBlocks'])
+  doc['soloHintCount'] = len(doc['hints'])
+  doc['followingHintCount'] = sum(map(lambda x : len(x), doc['followingBlocks'].values()))
+  doc['precedingHintCount'] = sum(map(lambda x : len(x), doc['precedingBlocks'].values()))  
   # remove details from original doc
   del doc['precedingBlocks']
   del doc['followingBlocks']
