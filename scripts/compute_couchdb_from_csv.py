@@ -47,11 +47,7 @@ design_documents = [
              }
            }
            ''',
-           "reduce": '''
-           function(keys, values, rereduce) {
-             return sum(values);
-           }
-           '''
+           "reduce": '_sum'
        }
    }
 }
