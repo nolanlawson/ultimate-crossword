@@ -58,8 +58,11 @@ def create_block_document(block, count):
   params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
+  
+  print "requesting block hints"
   block_hints = requests.get(block_hints_url, params=params).json()
-    
+  print "requested block hints, building up block document..."
+  
   result = {'_id' : anonymize(block), 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   rows = block_hints['rows'] if 'rows' in block_hints else []
   for block_hint in rows:
@@ -75,6 +78,7 @@ def create_block_document(block, count):
         result[key][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
+  print "built up block document."    
   return result
   
   
