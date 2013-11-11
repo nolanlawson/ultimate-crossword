@@ -7,7 +7,7 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, json, sys, base64, re, itertools
+import requests, grequests, urllib, json, sys, base64, re, itertools
 
 COUCHDB_BULK_INSERT_SIZE = 100
 MAX_NUM_HINTS_IN_SUMMARY = 30
@@ -52,16 +52,15 @@ def anonymize(block):
     anonymous_count += 1
     return str(count)
 
-def create_block_document(block, count):
+def get_block_hints_url(block):
   
-  block_hints_url = INPUT_URL + '/_design/blocks_to_hints/_view/blocks_to_hints'
   params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
   
-  print "requesting block hints"
-  block_hints = requests.get(block_hints_url, params=params).json()
-  print "requested block hints, building up block document..."
+  return INPUT_URL + '/_design/blocks_to_hints/_view/blocks_to_hints?' + urllib.urlencode(params)
+
+def create_block_document(block, count, block_hints):
   
   result = {'_id' : anonymize(block), 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   rows = block_hints['rows'] if 'rows' in block_hints else []
@@ -78,7 +77,7 @@ def create_block_document(block, count):
         result[key][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
-  print "built up block document."    
+  
   return result
   
   
@@ -159,7 +158,7 @@ def post_bulk(url, docs):
   if (str(response.status_code).startswith('4')): # error
     print " > > Got error", response.json()
   
-def post_documents_to_couchdb(docs, last_counter):
+def post_documents_to_couchdb(docs):
   
   summaries_and_details = map(split_doc_into_summary_and_details, docs);
   
@@ -176,8 +175,6 @@ def post_documents_to_couchdb(docs, last_counter):
   post_bulk(OUTPUT_DETAILS_URL, details_docs)
   post_bulk(OUTPUT_HINTS_URL, hints_docs)
   
-  print " > Posted %d blocks total." % (last_counter)
-  
 def create_block_documents():
   
   block_counts_url = INPUT_URL + '/_design/blocks_to_counts/_view/blocks_to_counts'
@@ -193,16 +190,25 @@ def create_block_documents():
       break
     
     print "Received %d docs from CouchDB" % len(block_counts['rows'])
-    docs_batch = map((lambda row : create_block_document(row['key'], row['value'])), block_counts['rows'])
     
-    counter += len(docs_batch)
+    block_hints_urls = map(lambda row : get_block_hints_url(row['key']), block_counts['rows']);
     
-    post_documents_to_couchdb(docs_batch, counter)
+    url_requests = (grequests.get(u) for u in block_hints_urls)
+    
+    print 'executing %d multiple requests for block hints at the same time' % len(block_hints_urls)
+    url_responses = grequests.map(url_requests)
+    print "done executing"
+    
+    docs_buffer = []
+    for (row, response) in zip(block_counts['rows'], url_responses):
+      block_hints = response.json()
+      docs_buffer.append(create_block_document(row['key'], row['value'], block_hints));
+    
+    post_documents_to_couchdb(docs_buffer);
+    counter += len(docs_buffer)
+    print "Posted %d docs total\n" % counter 
     
     params.update({'startkey' : json.dumps(block_counts['rows'][-1]['key']), 'skip' : 1})
-    
-    if (DEBUG_MODE and counter > (COUCHDB_BULK_INSERT_SIZE * 20)):
-      break
 
 def main():
   
