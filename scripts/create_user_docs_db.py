@@ -5,7 +5,7 @@
 
 import requests, json
 
-URL = 'http://localhost:5984/user_docs'
+URL = 'http://admin:password@koholint-wired:5985/user_docs'
 
 design_documents = [
 {
@@ -24,6 +24,16 @@ design_documents = [
     }
   }
 },
+{
+  '_id'  : '_design/app',\
+  'filters': {
+    'by_user' : '''
+       function(doc, req) {
+           return doc._id === req.userCtx.name;
+       }
+    '''
+  }
+}, 
 {
   '_id' : '_design/validate_correct_user',\
   'validate_doc_update' : '''
@@ -68,4 +78,4 @@ print 'creating database %s, response is %s' % (URL, requests.put(URL).status_co
 
 for design_doc in design_documents:
   response = requests.put(URL + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
-  print 'posted design doc %s to CouchDB, got response %d' % (design_doc['_id'], response.status_code)
+  print 'posted design doc %s to CouchDB, got response %d %s' % (design_doc['_id'], response.status_code, response.json())
