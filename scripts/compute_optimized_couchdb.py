@@ -8,12 +8,20 @@
 # 
 
 import requests, json, sys, re, itertools
+import gevent.monkey
+gevent.monkey.patch_socket()
+from gevent.pool import Pool
 
-COUCHDB_BULK_INSERT_SIZE = 100
 MAX_NUM_HINTS_IN_SUMMARY = 30
 
+COUCHDB_BULK_INSERT_SIZE = 500
+COUCHDB_READ_SIZE = 50000
+
+POOL_SIZE = 20
+NUM_RETRIES = 10
+
 # if true, sets stale to update_after
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
     'http://localhost:5985/blocks_sharded',\
@@ -22,11 +30,11 @@ INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
     'http://koholint-wired:5986/blocks_sharded',\
 ]
 
-INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids'
+INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids2'
 
-OUTPUT_URL = 'http://localhost:5984/block_summaries2'
-OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks2'
-OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints2'
+OUTPUT_URL = 'http://localhost:5984/block_summaries3'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks3'
+OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints3'
 
 design_documents = [
 {
@@ -44,38 +52,69 @@ design_documents = [
   }
 }]
 
-def create_block_document(block, int_id):
+blocks_to_ids = {}
 
+def lookup_int_id(block):
+  try:
+    return str(blocks_to_ids[block])
+  except KeyError:
+    return None # block wasn't important enough to have its own id in the block_ids db, so skip it
+
+def create_block_document(block, int_id, progress_indicator):
+
+  namespace = {'all_block_hint_rows' : []}
+  
   def get_block_hints_rows(input_url):
+    
     block_hints_url = input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
     params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
     if (DEBUG_MODE):
       params['stale'] = 'update_after'
-    block_hints = requests.get(block_hints_url, params=params).json()
+    
+    for i in range(NUM_RETRIES):
+      try:
+        block_hints = requests.get(block_hints_url, params=params).json()
+        break
+      except requests.exceptions.ConnectionError:
+        print "Connection error at %s, retrying for %dnth time" % (block_hints_url, i)
 
-    return block_hints['rows']
+    namespace['all_block_hint_rows'] += block_hints['rows']
   
-  
-  block_hint_rows = list(itertools.chain(*map(get_block_hints_rows, INPUT_COUCHDBS)))
+  # one thread for each db
+  pool = Pool(len(INPUT_COUCHDBS))
+  for url in INPUT_COUCHDBS:
+    pool.spawn(get_block_hints_rows, url)
+  pool.join()
   
   result = {'_id' : int_id, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   
-  for block_hint in block_hint_rows:
+  for block_hint in namespace['all_block_hint_rows']:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
     
     if len(key[0]) > 1: # has a related block
       (related_block, reverse_keys_and_values) = (key[0][1], key[1])
       
       key = 'precedingBlocks' if reverse_keys_and_values else 'followingBlocks';
+      
+      int_id = lookup_int_id(related_block)
+      
+      if int_id is None: # unimportant block
+        continue
+      
       try:
-        result[key][anonymize(related_block)] += hints
+        result[key][int_id] += hints
       except KeyError:
-        result[key][anonymize(related_block)] = hints
+        result[key][int_id] = hints
     else: # no related block; singleton only
       result['hints'] += hints
   
-  print ".",
-  
+  progress_indicator['progress'] += 1
+  sys.stdout.write(' > %.2f%%\r' % (progress_indicator['progress'] * 100.0 / progress_indicator['total']))
+  sys.stdout.flush()
+  if progress_indicator['progress'] == progress_indicator['total']:
+    sys.stdout.write('\n')
+    sys.stdout.flush()
+    
   return result
   
   
@@ -159,7 +198,7 @@ def post_bulk(url, docs):
   if (str(response.status_code).startswith('4')): # error
     print " > > Got error", response.json()
   
-def post_documents_to_couchdb(docs, last_counter):
+def post_documents_to_couchdb(docs):
   
   summaries_and_details = map(split_doc_into_summary_and_details, docs);
   
@@ -176,36 +215,73 @@ def post_documents_to_couchdb(docs, last_counter):
   post_bulk(OUTPUT_DETAILS_URL, details_docs)
   post_bulk(OUTPUT_HINTS_URL, hints_docs)
   
-  print " > Posted %d blocks total." % (last_counter)
-  
 def create_block_documents():
   
+  num_processed = 0
+  blocks_and_ids = blocks_to_ids.items()
+  for i in range(0, len(blocks_and_ids), COUCHDB_BULK_INSERT_SIZE * POOL_SIZE):
+    
+    limit = min(len(blocks_and_ids), i + (COUCHDB_BULK_INSERT_SIZE * POOL_SIZE))
+    batches_as_list = blocks_and_ids[i:limit]
+    
+    # partition into roughly equal sublists
+    async_batches = []
+    for j in range(0, len(batches_as_list), COUCHDB_BULK_INSERT_SIZE):
+      if j > len(batches_as_list):
+        break
+      limit = min(len(batches_as_list), j + COUCHDB_BULK_INSERT_SIZE)
+      async_batches.append(batches_as_list[j:limit])
+    
+    print "Processing %d docs from CouchDB in %d (%d * %d) concurrent threads" % \
+        (len(batches_as_list), POOL_SIZE * len(INPUT_COUCHDBS), POOL_SIZE, len(INPUT_COUCHDBS))
+    
+    namespace = {'num_docs_batches' : 0}
+    progress_indicator = {'progress' : 0, 'total' : len(batches_as_list)}
+    
+    def process_and_post(batch):  
+      docs_batch = map((lambda x : create_block_document(x[0], str(x[1]), progress_indicator)), batch)
+      post_documents_to_couchdb(docs_batch)
+      namespace['num_docs_batches'] += len(docs_batch)
+      
+    pool = Pool(POOL_SIZE)
+    for async_batch in async_batches:
+      pool.spawn(process_and_post, async_batch)
+    pool.join()
+    
+    num_processed += namespace['num_docs_batches']
+    print "\nPosted %d/%d (%.2f%%) blocks total." % (num_processed, len(blocks_to_ids), num_processed * 100.0 / len(blocks_to_ids))
+    
+    if DEBUG_MODE and num_processed > (COUCHDB_BULK_INSERT_SIZE * 20):
+      break
+
+def build_blocks_to_ids_map():
   block_ids_url = INPUT_BLOCK_IDS_DB + '/_all_docs'
-  params = {'limit' : COUCHDB_BULK_INSERT_SIZE, 'include_docs' : true}
-  if (DEBUG_MODE):
+  params = {'limit' : COUCHDB_READ_SIZE, 'include_docs' : 'true'}
+  if DEBUG_MODE:
     params['stale'] = 'update_after'
   
-  counter = 0
+  num_read = 0
   while True:
     block_ids = requests.get(block_ids_url, params=params).json()
 
-    if (len(block_counts) == 0):
+    if len(block_ids['rows']) == 0:
       break
     
-    print "Received %d docs from CouchDB" % len(block_ids['rows'])
-    docs_batch = map((lambda row : create_block_document(row['key'], row['doc']['intId'])), block_ids['rows'])
+    num_read += len(block_ids['rows'])
+    total = block_ids['total_rows']
+    print "Received %d/%d (%.2f%%) docs from CouchDB %s" % (num_read,total,num_read * 100.0/total, INPUT_BLOCK_IDS_DB)
     
-    print "\nCreated block documents"
-    
-    counter += len(docs_batch)
-    
-    post_documents_to_couchdb(docs_batch, counter)
+    for row in block_ids['rows']:
+      if 'intId' in row['doc']: # skip design documents
+        blocks_to_ids[row['key']] = row['doc']['intId']
     
     params.update({'startkey' : json.dumps(block_ids['rows'][-1]['key']), 'skip' : 1})
     
-    if (DEBUG_MODE and counter > (COUCHDB_BULK_INSERT_SIZE * 20)):
+    if DEBUG_MODE and num_read > 10000:
       break
-
+    
+  print "read in all docs from db %s" % INPUT_BLOCK_IDS_DB
+  
 def main():
   
   # drop and re-create both output databases
@@ -217,7 +293,9 @@ def main():
     response = requests.put(OUTPUT_URL + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
     print 'posted design doc %s to CouchDB, got response %d' % (design_doc['_id'], response.status_code)
   
-  print "reading from old CouchDB..."
+  print "\nreading from input CouchDB %s..." % (INPUT_BLOCK_IDS_DB)
+  build_blocks_to_ids_map()
+  print "\nreading from blocks_to_hints in %s, writing to %s..." % (INPUT_COUCHDBS, (OUTPUT_URL, OUTPUT_DETAILS_URL, OUTPUT_HINTS_URL))
   create_block_documents()
   
 if __name__=='__main__':

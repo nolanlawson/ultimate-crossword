@@ -120,7 +120,7 @@ def bulk_insert_to_couchdb(docs):
         response = requests.post(couchdb_url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={"Content-Type":"application/json"})
         print " > posted %d docs to CouchDB %s, response code: %d" % (len(docs), couchdb_url, response.status_code)
         break
-      except ConnectionError:
+      except requests.exceptions.ConnectionError:
         print "Connection error at %s, retrying for %dnth time" % (couchdb_url, i)
   
   urls_and_docs = []
