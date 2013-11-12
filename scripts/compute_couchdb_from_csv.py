@@ -6,13 +6,24 @@
 #
 
 import sys, re, getopt, csv, requests, json
+import gevent.monkey
+gevent.monkey.patch_socket()
+from gevent.pool import Pool
 
 MIN_BLOCK_COUNT = 2
 BATCH_SIZE = 1000000
 COUCHDB_BULK_INSERT_SIZE = 10000 # per http://dev.svetlyak.ru/couchdb-bulk-inserts-performance-en/
+POOL_SIZE = 100
+NUM_RETRIES = 10
 
-COUCHDB_HOST = '127.0.0.1'
-COUCHDB_DB = 'blocks'
+COUCHDBS = ['http://localhost:5984/blocks_sharded',\
+    'http://localhost:5985/blocks_sharded',\
+    'http://localhost:5986/blocks_sharded',\
+    'http://admin:password@koholint-wired:5985/blocks_sharded',\
+    'http://koholint-wired:5986/blocks_sharded',\
+]
+
+current_couch_idx = 0
 
 TOTAL_NUM_LINES = 153004874
 
@@ -52,8 +63,6 @@ design_documents = [
    }
 }
 ]
-
-couchdb_url = 'http://%s:5984/%s' % (COUCHDB_HOST, COUCHDB_DB);
 
 csvfile = open('cred.csv','rb')
 csvreader = csv.reader(csvfile, delimiter=',', quotechar='"', quoting=csv.QUOTE_ALL)
@@ -103,10 +112,40 @@ def create_docs(blocks, hints):
       [{'type' : 'block_hint', 'blocks' : hint[0], 'hints' : hint[1]} for hint in hints]
 
 def bulk_insert_to_couchdb(docs):
+  global current_couch_idx
+
+  def post((couchdb_url, docs)):
+    for i in range(NUM_RETRIES):
+      try:
+        response = requests.post(couchdb_url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={"Content-Type":"application/json"})
+        print " > posted %d docs to CouchDB %s, response code: %d" % (len(docs), couchdb_url, response.status_code)
+        break
+      except ConnectionError:
+        print "Connection error at %s, retrying for %dnth time" % (couchdb_url, i)
+  
+  urls_and_docs = []
+  
   for i in range(0, len(docs), COUCHDB_BULK_INSERT_SIZE):
+    
+    # round-robin choose a couchdb
+    couchdb_url = COUCHDBS[current_couch_idx]
+    current_couch_idx += 1
+    if (current_couch_idx == len(COUCHDBS)):
+      current_couch_idx = 0
+    
     limit = min(i + COUCHDB_BULK_INSERT_SIZE, len(docs))
-    response = requests.post(couchdb_url + '/_bulk_docs',data=json.dumps({'docs' : docs[i:limit]}),headers={'Content-Type':'application/json'})
-    print " > posted %d/%d (%.2f%%) docs to CouchDB, response code: %d" % (limit, len(docs), (100.0 * limit / len(docs)), response.status_code)
+    
+    urls_and_docs.append((couchdb_url, docs[i:limit]))
+  
+  print "we have %d tasks to execute for %d CouchDBs, spawning..." % (len(urls_and_docs), len(COUCHDBS))
+  
+  pool = Pool(POOL_SIZE)
+
+  for url_and_docs in urls_and_docs:
+    pool.spawn(post, url_and_docs);
+  pool.join()
+
+  print "Finished posting"
 
 def process_batch(rows):
 
@@ -118,8 +157,8 @@ def process_batch(rows):
     analyze_row(row, blocks, hints)
 
   blocks = dict(filter((lambda (block,count) : count >= MIN_BLOCK_COUNT), blocks.items()))
-  #hints = filter(lambda (hint_blocks, hints) : any(map((lambda block : block in blocks), hint_blocks)), hints.items())
-  print "found %d blocks" % (len(blocks))
+  
+  print "found %d blocks and %d hints" % (len(blocks), len(hints))
   
   docs = create_docs(blocks.items(), hints.items())
   bulk_insert_to_couchdb(docs)
@@ -127,14 +166,15 @@ def process_batch(rows):
 def create_database():
   
   # drop and re-create
-  print 'dropping database, response is', requests.delete(couchdb_url).status_code
-  print 'creating database, response is', requests.put(couchdb_url).status_code
+  for couchdb_url in COUCHDBS:
+    print 'dropping database in %s, response is %d' % (couchdb_url, requests.delete(couchdb_url).status_code)
+    print 'creating database in %s, response is %d' % (couchdb_url, requests.put(couchdb_url).status_code)
   
-  # post design documents to couchdb
-  design_documents.reverse()
-  for design_doc in design_documents:
-    response = requests.put(couchdb_url + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
-    print 'posted design doc %s to CouchDB, got response %d' % (design_doc['_id'], response.status_code)
+    # post design documents to couchdb
+    
+    for design_doc in design_documents:
+      response = requests.put(couchdb_url + '/' + design_doc['_id'],data=json.dumps(design_doc),headers={'Content-Type':'application/json'})
+      print 'posted design doc %s to CouchDB %s, got response %d' % (design_doc['_id'], couchdb_url, response.status_code)
   
 def main():
 

@@ -7,7 +7,7 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, json, sys, base64, re, itertools
+import requests, json, sys, re, itertools
 
 COUCHDB_BULK_INSERT_SIZE = 100
 MAX_NUM_HINTS_IN_SUMMARY = 30
@@ -15,7 +15,15 @@ MAX_NUM_HINTS_IN_SUMMARY = 30
 # if true, sets stale to update_after
 DEBUG_MODE = False
 
-INPUT_URL = 'http://localhost:5984/blocks'
+INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
+    'http://localhost:5985/blocks_sharded',\
+    'http://localhost:5986/blocks_sharded',\
+    'http://admin:password@koholint-wired:5985/blocks_sharded',\
+    'http://koholint-wired:5986/blocks_sharded',\
+]
+
+INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids'
+
 OUTPUT_URL = 'http://localhost:5984/block_summaries2'
 OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks2'
 OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints2'
@@ -36,33 +44,23 @@ design_documents = [
   }
 }]
 
-anonymizer = {}
-anonymous_count = 0
+def create_block_document(block, int_id):
 
-def anonymize(block):
-  global anonymous_count
-  
-  # I don't know if anyone will ever actually reverse-engineer Adobe's encryption, but
-  # I can cover my ass by using an integer instead of the string
-  try:
-    return str(anonymizer[block])
-  except KeyError:
-    count = anonymous_count
-    anonymizer[block] = count
-    anonymous_count += 1
-    return str(count)
+  def get_block_hints_rows(input_url):
+    block_hints_url = input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
+    params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+    if (DEBUG_MODE):
+      params['stale'] = 'update_after'
+    block_hints = requests.get(block_hints_url, params=params).json()
 
-def create_block_document(block, count):
+    return block_hints['rows']
   
-  block_hints_url = INPUT_URL + '/_design/blocks_to_hints/_view/blocks_to_hints'
-  params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
-  if (DEBUG_MODE):
-    params['stale'] = 'update_after'
-  block_hints = requests.get(block_hints_url, params=params).json()
-    
-  result = {'_id' : anonymize(block), 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
-  rows = block_hints['rows'] if 'rows' in block_hints else []
-  for block_hint in rows:
+  
+  block_hint_rows = list(itertools.chain(*map(get_block_hints_rows, INPUT_COUCHDBS)))
+  
+  result = {'_id' : int_id, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
+  
+  for block_hint in block_hint_rows:
     (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
     
     if len(key[0]) > 1: # has a related block
@@ -75,6 +73,9 @@ def create_block_document(block, count):
         result[key][anonymize(related_block)] = hints
     else: # no related block; singleton only
       result['hints'] += hints
+  
+  print ".",
+  
   return result
   
   
@@ -179,26 +180,28 @@ def post_documents_to_couchdb(docs, last_counter):
   
 def create_block_documents():
   
-  block_counts_url = INPUT_URL + '/_design/blocks_to_counts/_view/blocks_to_counts'
-  params = {'group' : 'true', 'reduce' : 'true', 'limit' : COUCHDB_BULK_INSERT_SIZE}
+  block_ids_url = INPUT_BLOCK_IDS_DB + '/_all_docs'
+  params = {'limit' : COUCHDB_BULK_INSERT_SIZE, 'include_docs' : true}
   if (DEBUG_MODE):
     params['stale'] = 'update_after'
   
   counter = 0
   while True:
-    block_counts = requests.get(block_counts_url, params=params).json()
+    block_ids = requests.get(block_ids_url, params=params).json()
 
     if (len(block_counts) == 0):
       break
     
-    print "Received %d docs from CouchDB" % len(block_counts['rows'])
-    docs_batch = map((lambda row : create_block_document(row['key'], row['value'])), block_counts['rows'])
+    print "Received %d docs from CouchDB" % len(block_ids['rows'])
+    docs_batch = map((lambda row : create_block_document(row['key'], row['doc']['intId'])), block_ids['rows'])
+    
+    print "\nCreated block documents"
     
     counter += len(docs_batch)
     
     post_documents_to_couchdb(docs_batch, counter)
     
-    params.update({'startkey' : json.dumps(block_counts['rows'][-1]['key']), 'skip' : 1})
+    params.update({'startkey' : json.dumps(block_ids['rows'][-1]['key']), 'skip' : 1})
     
     if (DEBUG_MODE and counter > (COUCHDB_BULK_INSERT_SIZE * 20)):
       break
@@ -216,11 +219,6 @@ def main():
   
   print "reading from old CouchDB..."
   create_block_documents()
-  
-  # just in case I need this later
-  fileout = open('block_mappings.json', 'wb')
-  print >>fileout,json.dumps(anonymizer)
-  fileout.close()
   
 if __name__=='__main__':
   main()
