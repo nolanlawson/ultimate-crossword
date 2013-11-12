@@ -99,10 +99,11 @@ def add_doc_hints_if_necessary(doc, doc_hints):
     sorted_hint_map.reverse()
     top_hints = dict(map(reverse_keys_and_values, sorted_hint_map[:MAX_NUM_HINTS_IN_SUMMARY]))
     doc['hintMap'] = top_hints
-    doc['hintsRedacted'] = True
+    doc['hintsRedacted'] = sum(map(lambda x:x[0],sorted_hint_map[MAX_NUM_HINTS_IN_SUMMARY:]))
     doc_hints.append({'_id' : doc['_id'], 'hintMap' : hint_map})
   else:
     doc['hintMap'] = hint_map
+    doc['hintsRedacted'] = 0
   
   del doc['hints']
 
