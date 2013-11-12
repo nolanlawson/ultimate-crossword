@@ -16,9 +16,9 @@ MAX_NUM_HINTS_IN_SUMMARY = 30
 DEBUG_MODE = False
 
 INPUT_URL = 'http://localhost:5984/blocks'
-OUTPUT_URL = 'http://localhost:5984/block_summaries'
-OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks'
-OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints'
+OUTPUT_URL = 'http://localhost:5984/block_summaries2'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks2'
+OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints2'
 
 design_documents = [
 {
@@ -95,7 +95,7 @@ def add_doc_hints_if_necessary(doc, doc_hints):
   # also, model the hints as a map of strings to ints rather than a list
   hint_map = create_hint_map(doc['hints'])
   if (len(hint_map.keys()) > MAX_NUM_HINTS_IN_SUMMARY):
-    sorted_hint_map = map(reverse_keys_and_values, hint_map.items());
+    sorted_hint_map = sorted(map(reverse_keys_and_values, hint_map.items()));
     sorted_hint_map.reverse()
     top_hints = dict(map(reverse_keys_and_values, sorted_hint_map[:MAX_NUM_HINTS_IN_SUMMARY]))
     doc['hintMap'] = top_hints
