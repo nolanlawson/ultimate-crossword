@@ -5,7 +5,7 @@
 
 import requests, json
 
-URL = 'http://admin:password@koholint-wired:5985/user_docs'
+URL = 'http://localhost:5984/user_docs'
 
 design_documents = [
 {
@@ -17,10 +17,12 @@ design_documents = [
       function(doc) {
         Object.keys(doc.guesses).forEach(function(key){
           var guess = doc.guesses[(key)];
-          emit([key, guess], 1);
+          if (guess) {
+            emit([key, guess], null);
+          }
         });
       }''',
-      'reduce' : '_sum'
+      'reduce' : '_count'
     }
   }
 },
@@ -54,14 +56,14 @@ design_documents = [
           if (typeof key !== 'string') {
             throw({forbidden : "Guesses must be a basic string-to-string map."});
           }
-          if (key.length > 100) {
+          if (key.length > 1000) {
             throw({forbidden : "That's a huge key!  You're probably trying to crash this server."});
           }
           var value = new_doc.guesses[(key)];
-          if (typeof value !== 'string') {
+          if (typeof value !== 'string' && value !== null) {
             throw({forbidden : "Guesses must be a basic string-to-string map."});
           }
-          if (value.length > 100) {
+          if (value && value.length > 1000) {
             throw({forbidden : "That's a huge value!  You're probably trying to crash this server."});
           }
         });
