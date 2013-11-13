@@ -81,6 +81,7 @@ def main():
     
       last_row = rows[-1]
       params.update({'startkey'  : json.dumps(last_row['doc']['_id']), 'skip' : 1})
+  print "Optimized solr, response was %d" % (requests.get(SOLR_URL + '/update?commit=true&optimize=true').status_code)
 
 if __name__=='__main__':
   main()
