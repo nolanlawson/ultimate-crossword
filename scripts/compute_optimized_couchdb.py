@@ -7,7 +7,7 @@
 # Given a block, what are the next/previous blocks and their associated hints?
 # 
 
-import requests, json, sys, re, itertools
+import requests, json, sys, re, itertools, random
 import gevent.monkey
 gevent.monkey.patch_socket()
 from gevent.pool import Pool
@@ -17,7 +17,7 @@ MAX_NUM_HINTS_IN_SUMMARY = 30
 COUCHDB_BULK_INSERT_SIZE = 500
 COUCHDB_READ_SIZE = 50000
 
-POOL_SIZE = 20
+POOL_SIZE = 100
 NUM_RETRIES = 10
 
 # if true, sets stale to update_after
@@ -67,7 +67,8 @@ def create_block_document(block, int_id, progress_indicator):
   def get_block_hints_rows(input_url):
     
     block_hints_url = input_url + '/_design/blocks_to_hints/_view/blocks_to_hints'
-    params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]])}
+    # use separators because no spaces in keys are allowed; CouchDB barfs on them
+    params = {'include_docs' : 'true', 'startkey' : json.dumps([[block]]), 'endkey' : json.dumps([[block, {}]],separators=(',', ':'))}
     if (DEBUG_MODE):
       params['stale'] = 'update_after'
     
@@ -80,11 +81,10 @@ def create_block_document(block, int_id, progress_indicator):
 
     namespace['all_block_hint_rows'] += block_hints['rows']
   
-  # one thread for each db
-  pool = Pool(len(INPUT_COUCHDBS))
-  for url in INPUT_COUCHDBS:
-    pool.spawn(get_block_hints_rows, url)
-  pool.join()
+  shuffled_couchdbs = list(INPUT_COUCHDBS)
+  random.shuffle(shuffled_couchdbs)
+  for url in shuffled_couchdbs:
+    get_block_hints_rows(url)
   
   result = {'_id' : int_id, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   
@@ -227,13 +227,12 @@ def create_block_documents():
     # partition into roughly equal sublists
     async_batches = []
     for j in range(0, len(batches_as_list), COUCHDB_BULK_INSERT_SIZE):
-      if j > len(batches_as_list):
+      if j >= len(batches_as_list):
         break
       limit = min(len(batches_as_list), j + COUCHDB_BULK_INSERT_SIZE)
       async_batches.append(batches_as_list[j:limit])
     
-    print "Processing %d docs from CouchDB in %d (%d * %d) concurrent threads" % \
-        (len(batches_as_list), POOL_SIZE * len(INPUT_COUCHDBS), POOL_SIZE, len(INPUT_COUCHDBS))
+    print "Processing %d docs from CouchDB in %d concurrent threads" % (len(batches_as_list), POOL_SIZE)
     
     namespace = {'num_docs_batches' : 0}
     progress_indicator = {'progress' : 0, 'total' : len(batches_as_list)}
@@ -243,10 +242,11 @@ def create_block_documents():
       post_documents_to_couchdb(docs_batch)
       namespace['num_docs_batches'] += len(docs_batch)
       
-    pool = Pool(POOL_SIZE)
+    #pool = Pool(POOL_SIZE)
     for async_batch in async_batches:
-      pool.spawn(process_and_post, async_batch)
-    pool.join()
+      #pool.spawn(process_and_post, async_batch)
+      process_and_post(async_batch)
+    #pool.join()
     
     num_processed += namespace['num_docs_batches']
     print "\nPosted %d/%d (%.2f%%) blocks total." % (num_processed, len(blocks_to_ids), num_processed * 100.0 / len(blocks_to_ids))
