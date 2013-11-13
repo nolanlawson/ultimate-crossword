@@ -26,15 +26,15 @@ DEBUG_MODE = True
 INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
     'http://localhost:5985/blocks_sharded',\
     'http://localhost:5986/blocks_sharded',\
-    'http://admin:password@koholint-wired:5985/blocks_sharded',\
-    'http://koholint-wired:5986/blocks_sharded',\
+    'http://localhost:5987/blocks_sharded',\
+    'http://localhost:5988/blocks_sharded',\
 ]
 
-INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids2'
+INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids'
 
-OUTPUT_URL = 'http://localhost:5984/block_summaries3'
-OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks3'
-OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints3'
+OUTPUT_URL = 'http://localhost:5984/block_summaries'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks'
+OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints'
 
 design_documents = [
 {
