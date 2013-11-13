@@ -21,7 +21,7 @@ POOL_SIZE = 20
 NUM_RETRIES = 10
 
 # if true, sets stale to update_after
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
     'http://localhost:5985/blocks_sharded',\
