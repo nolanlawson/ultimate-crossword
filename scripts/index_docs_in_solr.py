@@ -11,7 +11,7 @@ COUCHDB_HINTS_URL = 'http://localhost:5984/block_hints'
 
 SOLR_URL = 'http://localhost:8983/solr'
 
-COUCHDB_BULK_SIZE = 10000
+COUCHDB_BULK_SIZE = 1000
 
 def enhance_with_full_hints(rows):
   # fetch hints from the block_hints database if necessary
@@ -21,7 +21,7 @@ def enhance_with_full_hints(rows):
     return rows;
   
   
-  response = requests.get(COUCHDB_HINTS_URL + '/_all_docs', params={'keys' : json.dumps(keys), 'include_docs' : 'true'}).json();
+  response = requests.get(COUCHDB_HINTS_URL + '/_all_docs', params={'keys' : json.dumps(keys,separators=(',',':')), 'include_docs' : 'true'}).json();
   
   ids_to_hints = dict(map(lambda row : (row['key'], row['doc']['hintMap']), response['rows']))
   
