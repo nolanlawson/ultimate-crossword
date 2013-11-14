@@ -5,13 +5,14 @@
 #
 import requests, json
 
-COUCHDB_SUMMARIES_URL = 'http://localhost:5984/block_summaries'
-COUCHDB_RELATED_URL = 'http://localhost:5984/related_blocks'
-COUCHDB_HINTS_URL = 'http://localhost:5984/block_hints'
+COUCHDB_SUMMARIES_URL = 'http://localhost:5984/block_summaries2'
+COUCHDB_RELATED_URL = 'http://localhost:5984/related_blocks2'
+COUCHDB_HINTS_URL = 'http://localhost:5984/block_hints2'
 
 SOLR_URL = 'http://localhost:8983/solr'
 
-COUCHDB_BULK_SIZE = 1000
+COUCHDB_BULK_SIZE = 10000
+COUCHDB_NUM_KEYS_IN_GETS = 500
 
 def enhance_with_full_hints(rows):
   # fetch hints from the block_hints database if necessary
@@ -20,10 +21,17 @@ def enhance_with_full_hints(rows):
   if (len(keys) == 0): # no hints redacted
     return rows;
   
+  # fetch in batches because there are limits to how many keys you can stuff in an http get
+  rows = []
+  for i in range(0, len(keys), COUCHDB_NUM_KEYS_IN_GETS):
+    
+    limit = min(len(keys), i + COUCHDB_NUM_KEYS_IN_GETS)
+    params = {'keys' : json.dumps(keys[i:limit],separators=(',',':')), 'include_docs' : 'true'}
+    
+    rows += requests.get(COUCHDB_HINTS_URL + '/_all_docs', params=params).json()['rows']
+    
   
-  response = requests.get(COUCHDB_HINTS_URL + '/_all_docs', params={'keys' : json.dumps(keys,separators=(',',':')), 'include_docs' : 'true'}).json();
-  
-  ids_to_hints = dict(map(lambda row : (row['key'], row['doc']['hintMap']), response['rows']))
+  ids_to_hints = dict(map(lambda row : (row['key'], row['doc']['hintMap']), rows))
   
   for row in rows:
     if 'hintsRedacted' in row['doc'] and row['doc']['hintsRedacted']:
@@ -74,7 +82,6 @@ def main():
           headers={'Content-Type' : 'application/json'},data=json.dumps({'add' : solr_docs}))
     
       print "Posted %d docs to solr, response was %d" % (len(solr_docs), solr_response.status_code)
-      print solr_response.text
     
       if len(rows) < COUCHDB_BULK_SIZE: # done reading from couchdb
         break
