@@ -14,11 +14,12 @@ from gevent.pool import Pool
 
 MAX_NUM_HINTS_IN_SUMMARY = 30
 
-COUCHDB_BULK_INSERT_SIZE = 500
+COUCHDB_BULK_INSERT_SIZE = 100
 COUCHDB_READ_SIZE = 50000
-COUCHDB_RELATED_READ_SIZE = 500
+COUCHDB_RELATED_READ_SIZE = 1000
+RELATED_BLOCKS_BULK_INSERT_SIZE = 10000
 
-POOL_SIZE = 300
+POOL_SIZE = 50
 NUM_RETRIES = 10
 
 # if true, sets stale to update_after
@@ -33,9 +34,9 @@ INPUT_COUCHDBS = ['http://localhost:5984/blocks_sharded',\
 
 INPUT_BLOCK_IDS_DB = 'http://localhost:5984/block_ids'
 
-OUTPUT_URL = 'http://localhost:5984/block_summaries2'
-OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks2'
-OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints2'
+OUTPUT_URL = 'http://localhost:5984/block_summaries3'
+OUTPUT_DETAILS_URL = 'http://localhost:5984/related_blocks3'
+OUTPUT_HINTS_URL = 'http://localhost:5984/block_hints3'
 
 design_documents = [
 {
@@ -53,13 +54,19 @@ design_documents = [
   }
 }]
 
-blocks_to_ids = {}
+blocks_to_ids = {
+  }
 
 def lookup_int_id(block):
   try:
     return str(blocks_to_ids[block])
   except KeyError:
     return None # block wasn't important enough to have its own id in the block_ids db, so skip it
+
+def convert_to_key_hint_pairs(rows):
+  # these block hints rows take up a lot of space in memory; have to optimize it so
+  # Python spends less time garbage collecting
+  return map(lambda row : (row['key'],row['doc']['hints']), rows)
 
 def get_block_hints_rows((input_url, block)):
   rows = []
@@ -80,17 +87,19 @@ def get_block_hints_rows((input_url, block)):
   while True:
     for i in range(NUM_RETRIES):
       try:
+        print "getting block hints from %s, %s..." % (block_hints_url, params)
         current_rows = requests.get(block_hints_url, params=params).json()['rows']
+        print "got block hints"
         break
       except requests.exceptions.ConnectionError:
         print "Connection error at %s, %s, retrying for %dth time" % (block_hints_url, params, i)
 
     if len(current_rows) == (COUCHDB_RELATED_READ_SIZE + 1):
       # fetched one too many, so keep paging
-      rows += current_rows[:-1]
+      rows += convert_to_key_hint_pairs(current_rows[:-1])
       params['startkey'] = json.dumps(current_rows[-1]['key'],separators=(',',':'))
     else:
-      rows += current_rows
+      rows += convert_to_key_hint_pairs(current_rows)
       break
   
   return rows
@@ -102,12 +111,21 @@ def create_block_document(block, int_id, progress_indicator):
   # hit each couchdb roughly equally
   random.shuffle(urls_and_the_block)
   
-  all_block_hint_rows = list(itertools.chain(*map(get_block_hints_rows, urls_and_the_block))) # flatten
+  async_result = {'rows' : []}
+  
+  def getEm(url_and_the_block):
+    async_result['rows'] += get_block_hints_rows(url_and_the_block)
+  
+  pool = Pool(len(INPUT_COUCHDBS))
+  for url_and_the_block in urls_and_the_block:
+    pool.spawn(getEm, url_and_the_block)
+  pool.join()
+  
+  all_block_hint_rows = async_result['rows']
   
   result = {'_id' : int_id, 'hints' : [], 'precedingBlocks' : {}, 'followingBlocks' : {}}
   
-  for block_hint in all_block_hint_rows:
-    (key, hints) = (block_hint['key'], block_hint['doc']['hints'])
+  for (key, hints) in all_block_hint_rows:
     
     if len(key[0]) > 1: # has a related block
       (related_block, reverse_keys_and_values) = (key[0][1], key[1])
@@ -210,16 +228,23 @@ def split_doc_into_summary_and_details(doc):
   return (doc, related_blocks, doc_hints)
 
 def post_bulk(url, docs):
-  for i in range(NUM_RETRIES):
-    try:
-      response = requests.post(url + '/_bulk_docs',data=json.dumps({'docs' : docs}),headers={'Content-Type':'application/json'})
-      break
-    except requests.exceptions.ConnectionError:
-      print "Connection error at %s, %s, retrying for %dth time" % (block_hints_url, params, i)
   
-  print " > Posted %d documents to %s, response: %d" % (len(docs), url, response.status_code)
-  if (str(response.status_code).startswith('4')): # error
-    print " > > Got error", response.json()
+  for j in range(0, len(docs), RELATED_BLOCKS_BULK_INSERT_SIZE):
+    
+    limit = min(len(docs), j + RELATED_BLOCKS_BULK_INSERT_SIZE)
+    subdocs = docs[j:limit]
+    
+    for i in range(NUM_RETRIES):
+      try:
+        print "About to post %d docs to %s" % (len(subdocs), url)
+        response = requests.post(url + '/_bulk_docs',data=json.dumps({'docs' : subdocs}),headers={'Content-Type':'application/json'})
+        break
+      except requests.exceptions.ConnectionError:
+        print "Connection error at %s, %s, retrying for %dth time" % (block_hints_url, params, i)
+
+    print " > Posted %d documents to %s, response: %d" % (len(subdocs), url, response.status_code)
+    if (str(response.status_code).startswith('4')): # error
+      print " > > Got error", response.json()
   
 def post_documents_to_couchdb(docs):
   
