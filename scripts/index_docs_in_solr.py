@@ -14,6 +14,25 @@ SOLR_URL = 'http://localhost:8983/solr'
 COUCHDB_BULK_SIZE = 10000
 COUCHDB_NUM_KEYS_IN_GETS = 200
 
+related_blocks_already_processed = set()
+
+# there are duplicates, because we store both the reverse and the forward of every two-block sequence,
+# so we need to be careful not to insert duplicates
+def already_processed_related(related_block):
+  if ('_id' not in related_block['doc'] or '~' not in related_block['doc']['_id']): # not a related block
+    return False
+  
+  unique_id = tuple(sorted([int(related_block['doc']['_id'].split('~')[0]),related_block['doc']['block']]))
+  
+  return unique_id in related_blocks_already_processed
+  
+def mark_related_as_processed(related_block):
+  if ('_id' not in related_block['doc'] or '~' not in related_block['doc']['_id']): # not a related block
+    return False
+    
+  unique_id = tuple(sorted([int(related_block['doc']['_id'].split('~')[0]),related_block['doc']['block']]))
+  related_blocks_already_processed.add(unique_id)
+
 def enhance_with_full_hints(rows):
   # fetch hints from the block_hints database if necessary
   keys = map(lambda row : row['doc']['_id'], filter((lambda row : 'hintsRedacted' in row['doc'] and row['doc']['hintsRedacted']),rows))
@@ -72,7 +91,10 @@ def main():
         break
           
       # filter design documents and hintless documents
-      filtered_rows = filter(lambda row : ('hintMap' in row['doc']) and (len(row['doc']['hintMap'].keys()) > 0), rows)
+      filtered_rows = filter(lambda row : ('hintMap' in row['doc']) and (len(row['doc']['hintMap'].keys()) > 0) and (not already_processed_related(row)), rows)
+    
+      for row in filtered_rows:
+        mark_related_as_processed(row)
     
       enhanced_rows = enhance_with_full_hints(filtered_rows)
     

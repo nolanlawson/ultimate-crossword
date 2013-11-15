@@ -55,40 +55,6 @@ design_documents = [
 }]
 
 design_documents_hints = [
-{
-  '_id'  : '_design/blocks_to_hints',
-  'views': {
-    'blocks_to_hints' : {
-      'language' : 'javascript',
-      'map'      : '''
-function (doc) {
-    // sort by counts descending, ,hints ascending
-    var countsToHints = {};
-    Object.keys(doc.hintMap).forEach(function(hint) {
-        var count = doc.hintMap[hint];
-        countsToHints[count] = (countsToHints[count] || []).concat([hint]);
-    });
-
-    var sortedCounts = Object.keys(countsToHints);
-    sortedCounts.sort(function(a,b) {
-        return a - b;
-    });
-    sortedCounts.reverse();
-
-    var counter = 0;
-    for (var i = 0, len = sortedCounts.length ; i < len; i++) {
-        var count = sortedCounts[i];
-        var hints = countsToHints[count];
-        hints.sort();
-        for (var j = 0, len2 = hints.length; j < len2; j++) {
-            var hint = hints[j];
-            counter++;
-            emit([doc._id, counter], [hint, parseInt(count,10)]);
-        }
-    }
-}'''
-  }
-}
 ]
 
 blocks_to_ids = {
