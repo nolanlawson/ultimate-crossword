@@ -40,6 +40,10 @@ design_documents = [
   '_id' : '_design/validate_correct_user',\
   'validate_doc_update' : '''
     function(new_doc, old_doc, userCtx) {
+      if (userCtx.roles.indexOf('_admin') !== -1) {
+        return; // admins are ok
+      }
+
       if (!userCtx.name || !new_doc._id || new_doc._id !== userCtx.name) {
         throw({forbidden : "Not authorized! Your userdoc must have the same id as your username."});
       }
