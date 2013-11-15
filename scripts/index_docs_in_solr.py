@@ -5,14 +5,14 @@
 #
 import requests, json
 
-COUCHDB_SUMMARIES_URL = 'http://localhost:5984/block_summaries2'
-COUCHDB_RELATED_URL = 'http://localhost:5984/related_blocks2'
-COUCHDB_HINTS_URL = 'http://localhost:5984/block_hints2'
+COUCHDB_SUMMARIES_URL = 'http://localhost:5984/block_summaries'
+COUCHDB_RELATED_URL = 'http://localhost:5984/related_blocks'
+COUCHDB_HINTS_URL = 'http://localhost:5984/block_hints'
 
 SOLR_URL = 'http://localhost:8983/solr'
 
 COUCHDB_BULK_SIZE = 10000
-COUCHDB_NUM_KEYS_IN_GETS = 500
+COUCHDB_NUM_KEYS_IN_GETS = 200
 
 def enhance_with_full_hints(rows):
   # fetch hints from the block_hints database if necessary
